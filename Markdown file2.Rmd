@@ -1,0 +1,192 @@
+---
+title: "Drug-related Hospital Admissions in Scotland (2003–2022)"
+author: "Othman"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+  html_document:
+    toc: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+# Global options for knitting
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+# Install necessary packages if not already installed:
+# install.packages(c("tidyverse", "kableExtra"))
+
+# Load libraries
+library(tidyverse)  # Includes ggplot2, dplyr, readr
+library(kableExtra) # For formatting tables professionally
+```
+
+# Summary
+
+**Target Audience and Key Message**
+This report is targeted at **Public Health Scotland policymakers and government health officials**. The key message conveyed by the visualizations is that while drug-related hospital admissions have shown a slight decline in the most recent reporting periods (2021–2022), the long-term trend remains critically high compared to the 2003 baseline. The data highlights a rapid escalation in admissions between 2013 and 2019, necessitating continued intervention despite the recent dip.
+
+**Data Source and Limitations**
+[cite_start]The analysis uses the "Drug-related hospital admissions" dataset provided by **Public Health Scotland (SMR01)**[cite: 1]. [cite_start]The data presents age-sex standardised rates per 100,000 population and absolute admission counts (numerator) as 3-year rolling averages[cite: 1]. 
+* **Limitations:** The primary limitation is that these are *admissions*, not *individuals*; one person may be admitted multiple times. [cite_start]Additionally, the "3-year rolling average" methodology[cite: 1], while useful for smoothing trends, can introduce a lag in detecting immediate changes in the most recent year.
+
+**Strengths and Limitations of the Approach**
+* [cite_start]**Strengths:** We utilized **Age-sex standardised rates** [cite: 1] rather than raw counts for the primary trend analysis. This controls for changes in Scotland's population structure over the 20-year period, ensuring a fair comparison.
+* **Limitations:** The visualization is limited to the aggregate national level. It does not break down the data by specific drug types, deprivation indices, or health board regions, which would be required for more targeted local policy decisions.
+
+---
+
+# 1. Data Acquisition
+
+In this stage, we load the raw dataset using the `readr` package. This allows us to inspect the initial structure and ensure the file is read correctly.
+
+```{r data-acquisition}
+# Load the dataset
+# Ensure "Drug data.csv" is in the same directory as this .Rmd file
+raw_data <- read_csv("Drug data.csv")
+
+# Display the first few rows to verify structure
+head(raw_data)
+```
+
+# 2. Data Cleaning and Validation
+
+Here, we ensure all variables are in the correct format for analysis. We specifically ensure that the `year` is treated as an integer and the statistical measures (rates and confidence intervals) are numeric.
+
+```{r data-cleaning}
+clean_data <- raw_data %>%
+  # Select only the relevant columns to keep the dataframe clean
+  select(year, numerator, measure, lower_confidence_interval, upper_confidence_interval) %>%
+  
+  # Ensure data types are correct (explicit conversion)
+  mutate(
+    year = as.integer(year),
+    numerator = as.numeric(numerator),
+    measure = as.numeric(measure),
+    lower_ci = as.numeric(lower_confidence_interval),
+    upper_ci = as.numeric(upper_confidence_interval)
+  ) %>%
+  
+  # Validation: Filter out any rows where the year or measure might be missing
+  filter(!is.na(year) & !is.na(measure)) %>%
+  
+  # Sort chronologically
+  arrange(year)
+
+# Check the cleaned data structure
+glimpse(clean_data)
+```
+
+# 3. Data Transformation
+
+To help policymakers grasp the scale of the problem quickly, we transform the data to extract key milestones: the **baseline** (start of data), the **peak** (highest recorded rate), and the **latest** figures. We also calculate the percentage change from the baseline.
+
+```{r data-transformation}
+# Extract key milestones
+baseline <- clean_data %>% slice_min(year, n = 1)
+peak     <- clean_data %>% slice_max(measure, n = 1)
+latest   <- clean_data %>% slice_max(year, n = 1)
+
+# Create a summary dataframe for reporting
+milestone_summary <- bind_rows(baseline, peak, latest) %>%
+  mutate(
+    Milestone = c("Baseline (2003)", "Peak Value", "Latest (2022)"),
+    `Rate per 100k` = measure,
+    `Total Admissions` = numerator
+  ) %>%
+  select(Milestone, year, `Rate per 100k`, `Total Admissions`)
+
+# Display the summary table
+milestone_summary %>%
+  kbl(caption = "Table 1: Key Milestones in Drug-Related Admissions") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+# 4. Visualization
+
+## Figure 1: Long-term Trend of Drug-Related Hospital Admissions
+
+[cite_start]This visualization focuses on the **Age-sex standardised rate**[cite: 1]. Using the rate is superior to raw counts for policy analysis as it accounts for population changes. We include the 95% Confidence Interval (ribbon) to show the statistical precision of the estimates.
+
+```{r fig1-trend, fig.width=8, fig.height=5}
+ggplot(clean_data, aes(x = year, y = measure)) +
+  # Add the Confidence Interval ribbon (gray shaded area)
+  geom_ribbon(
+    aes(ymin = lower_ci, ymax = upper_ci),
+    fill = "steelblue",
+    alpha = 0.2
+  ) +
+  
+  # Add the main trend line
+  geom_line(color = "steelblue", linewidth = 1.2) +
+  
+  # Add points for each year to make specific values readable
+  geom_point(color = "steelblue", size = 2) +
+  
+  # Highlight the peak year with a dashed vertical line
+  geom_vline(xintercept = peak$year, linetype = "dashed", color = "darkred") +
+  annotate("text", x = peak$year + 0.5, y = peak$measure, 
+           label = paste("Peak:", peak$year), 
+           color = "darkred", hjust = 0) +
+  
+  # Scale and Labels
+  scale_x_continuous(breaks = seq(min(clean_data$year), max(clean_data$year), by = 2)) +
+  labs(
+    title = "Drug-Related Hospital Admissions in Scotland (2003–2022)",
+    subtitle = "Age-sex standardised rate per 100,000 population (3-year rolling average)",
+    caption = "Source: Public Health Scotland (SMR01)",
+    x = "Year",
+    y = "Rate per 100,000"
+  ) +
+  
+  # Theme adjustments for a clean, professional look
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+  
+  # Theme adjustments for a clean, professional look
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+**Interpretation:**
+[cite_start]The graph illustrates a steady increase in admission rates starting around 2006, accelerating significantly between 2013 and 2019. The rate peaked in 2019 at `r peak$measure` per 100,000[cite: 17]. [cite_start]Although there has been a decline in the last three years (to `r latest$measure` in 2022)[cite: 20], the current rate remains nearly double that of the 2003 baseline.
+
+## Figure 2: Volume of Admissions (Numerator)
+
+While the rate is useful for comparison, the *absolute number* of admissions represents the actual burden on hospital resources.
+
+ggplot(clean_data, aes(x = year, y = numerator)) +
+  geom_col(fill = "#69b3a2", alpha = 0.9) +
+  # Add text labels on top of the bars for clarity
+  geom_text(aes(label = numerator), vjust = -0.5, size = 3) +
+  labs(
+    title = "Estimated number of drug-related hospital admissions",
+    subtitle = "Absolute count (Numerator)",
+    [cite_start]caption = "Source: Public Health Scotland (SMR01) [cite: 1]",
+    x = "Year",
+    y = "Admissions (count)"
+  ) +
+  theme_minimal(base_size = 11) +
+  # Expand y-axis slightly so labels don't get cut off
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))
+  
+  # Theme
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    plot.title = element_text(face = "bold")
+  )
+```
+
+**Interpretation:**
+[cite_start]In terms of pure volume, hospital admissions reached a high of **12,330** in 2019[cite: 17]. [cite_start]By 2022, this number dropped to **9,426**[cite: 20]. [cite_start]While this reduction is positive, the burden on the healthcare system remains significantly higher than the roughly 5,000 admissions seen in the early 2000s[cite: 1].
